@@ -1,0 +1,115 @@
+---
+- name: Deploy MIST bot
+  hosts: mist_bot
+  become: false
+
+  pre_tasks:
+    - name: Validar branch_name
+      ansible.builtin.assert:
+        that:
+          - branch_name is defined
+          - branch_name | length > 0
+        fail_msg: "Falta -e branch_name=..."
+
+    - name: Validar env_file
+      ansible.builtin.assert:
+        that:
+          - env_file is defined
+          - env_file | length > 0
+        fail_msg: "Falta -e env_file=..."
+
+    - name: Validar compose_file
+      ansible.builtin.assert:
+        that:
+          - compose_file is defined
+          - compose_file | length > 0
+        fail_msg: "Falta -e compose_file=..."
+
+    - name: Validar deploy_path
+      ansible.builtin.assert:
+        that:
+          - deploy_path is defined
+          - deploy_path | length > 0
+        fail_msg: "Falta -e deploy_path=..."
+
+    - name: Definir nombre destino del compose
+      ansible.builtin.set_fact:
+        compose_target_name: "{{ compose_target_name | default('docker-compose.yml') }}"
+
+  tasks:
+    - name: Crear directorio base de despliegue
+      ansible.builtin.file:
+        path: "{{ deploy_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Sincronizar proyecto al servidor
+      ansible.posix.synchronize:
+        src: "{{ playbook_dir }}/../"
+        dest: "{{ deploy_path }}/"
+        delete: false
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=.venv"
+          - "--exclude=venv"
+          - "--exclude=__pycache__"
+          - "--exclude=*.pyc"
+          - "--exclude=.env"
+          - "--exclude=data"
+
+    - name: Copiar perfil de entorno seleccionado
+      ansible.posix.synchronize:
+        src: "{{ env_file }}"
+        dest: "{{ deploy_path }}/.env"
+        delete: false
+
+    - name: Copiar docker-compose de despliegue
+      ansible.posix.synchronize:
+        src: "{{ compose_file }}"
+        dest: "{{ deploy_path }}/{{ compose_target_name }}"
+        delete: false
+
+    - name: Verificar Docker Compose en el servidor
+      ansible.builtin.command: docker compose version
+      register: docker_compose_version
+      changed_when: false
+
+    - name: Construir y levantar servicios
+      block:
+        - name: Levantar servicios con cache de Docker
+          ansible.builtin.command:
+            cmd: "docker compose -f {{ compose_target_name }} up -d --build --remove-orphans"
+            chdir: "{{ deploy_path }}"
+          changed_when: true
+
+      rescue:
+        - name: Limpiar cache de construccion de Docker
+          ansible.builtin.command: docker builder prune -f
+          changed_when: true
+
+        - name: Limpiar imagenes colgadas de Docker
+          ansible.builtin.command: docker image prune -f
+          changed_when: true
+
+        - name: Reconstruir sin cache despues de limpiar Docker
+          ansible.builtin.command:
+            cmd: "docker compose -f {{ compose_target_name }} build --no-cache"
+            chdir: "{{ deploy_path }}"
+          changed_when: true
+
+        - name: Levantar servicios despues de reconstruir
+          ansible.builtin.command:
+            cmd: "docker compose -f {{ compose_target_name }} up -d --remove-orphans"
+            chdir: "{{ deploy_path }}"
+          changed_when: true
+
+    - name: Mostrar estado de Docker Compose
+      ansible.builtin.command:
+        cmd: "docker compose -f {{ compose_target_name }} ps"
+        chdir: "{{ deploy_path }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Imprimir estado de Docker Compose
+      ansible.builtin.debug:
+        var: compose_ps.stdout_lines
