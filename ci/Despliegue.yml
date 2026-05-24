@@ -1,7 +1,7 @@
 ---
 - name: Deploy MIST bot
   hosts: mist_bot
-  become: true
+  become: false
 
   pre_tasks:
     - name: Validar branch_name
@@ -47,7 +47,6 @@
       ansible.posix.synchronize:
         src: "{{ playbook_dir }}/../"
         dest: "{{ deploy_path }}/"
-        rsync_path: "sudo rsync"
         delete: false
         rsync_opts:
           - "--exclude=.git"
@@ -62,14 +61,12 @@
       ansible.posix.synchronize:
         src: "{{ env_file }}"
         dest: "{{ deploy_path }}/.env"
-        rsync_path: "sudo rsync"
         delete: false
 
     - name: Copiar docker-compose de despliegue
       ansible.posix.synchronize:
         src: "{{ compose_file }}"
         dest: "{{ deploy_path }}/{{ compose_target_name }}"
-        rsync_path: "sudo rsync"
         delete: false
 
     - name: Verificar Docker Compose en el servidor
