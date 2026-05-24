@@ -37,6 +37,8 @@ pipeline {
 			steps {
 				sh '''
 				  set -eu
+				  python3 -m ensurepip --upgrade || true
+				  python3 -m pip install --user --upgrade pip
 				  python3 -m pip install --user poetry
 				  export PATH="$HOME/.local/bin:$PATH"
 				  poetry install --no-root
@@ -89,7 +91,9 @@ ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 ansible_python_interpreter=/usr/bin/python3
 EOF
 
-					  python3 -m pip install --user ansible
+						python3 -m ensurepip --upgrade || true
+						python3 -m pip install --user --upgrade pip
+						python3 -m pip install --user ansible
 					  export PATH="$HOME/.local/bin:$PATH"
 					  ansible-playbook \
 						-i ci/inventory/inventory.ini \
