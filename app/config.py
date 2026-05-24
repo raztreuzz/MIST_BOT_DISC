@@ -21,7 +21,7 @@ if DATABASE_URL is None:
 # `OLLAMA_FAST_MODEL` should be set to a fast, smaller model available locally.
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 # A default fast model name - override with env var if you have a specific fast model
-OLLAMA_FAST_MODEL = os.getenv("OLLAMA_FAST_MODEL", os.getenv("OLLAMA_MODEL", "llama2-mini"))
+OLLAMA_FAST_MODEL = os.getenv("OLLAMA_FAST_MODEL", os.getenv("OLLAMA_MODEL", "llama3"))
 # Optional comma-separated list of allowed fast models for the `/chat` command
 _fast_models = os.getenv("OLLAMA_FAST_MODELS")
 OLLAMA_FAST_MODELS = [m.strip() for m in _fast_models.split(",")] if _fast_models else []
