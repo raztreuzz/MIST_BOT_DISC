@@ -1,0 +1,52 @@
+import discord
+from discord import app_commands
+from discord.ext import commands
+from typing import Optional
+
+from app.config import CIRCLE_ROLE_NAME
+
+
+def setup_moderation_commands(bot: commands.Bot) -> None:
+    @bot.tree.command(name="purge", description="Borra mensajes del canal (máx 100).")
+    @app_commands.describe(amount="Cantidad de mensajes a borrar (1-100)", user="Opcional: usuario cuyo mensajes borrar")
+    async def purge(interaction: discord.Interaction, amount: int, user: Optional[discord.Member] = None):
+        # Basic checks
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en servidores.", ephemeral=True)
+            return
+
+        # Check permissions: Manage Messages or role
+        member = interaction.guild.get_member(interaction.user.id)
+        if member is None:
+            try:
+                member = await interaction.guild.fetch_member(interaction.user.id)
+            except Exception:
+                member = interaction.user
+
+        role_names = [r.name for r in getattr(member, 'roles', []) if getattr(r, 'name', '') != '@everyone']
+        has_perm = interaction.user.guild_permissions.manage_messages or (CIRCLE_ROLE_NAME in role_names)
+        if not has_perm:
+            await interaction.response.send_message("No tenés permiso para borrar mensajes.", ephemeral=True)
+            return
+
+        if amount < 1 or amount > 100:
+            await interaction.response.send_message("El parámetro `amount` debe estar entre 1 y 100.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.followup.send("Este comando solo funciona en canales de texto.", ephemeral=True)
+            return
+
+        def check(m: discord.Message) -> bool:
+            if user is None:
+                return True
+            return m.author.id == user.id
+
+        try:
+            deleted = await channel.purge(limit=amount, check=check)
+            await interaction.followup.send(f"Borrados {len(deleted)} mensajes.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Error al borrar mensajes: {e}", ephemeral=True)

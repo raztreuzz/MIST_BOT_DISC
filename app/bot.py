@@ -4,8 +4,10 @@ from discord.ext import commands
 from app.config import DISCORD_TOKEN
 from app.lists import setup_lists_commands
 from app.commands.music_commands import setup_music_commands
+from app.commands.moderation_commands import setup_moderation_commands
 
 intents = discord.Intents.default()
+intents.members = True
 
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
@@ -18,6 +20,7 @@ async def on_ready():
 
 setup_music_commands(bot)
 setup_lists_commands(bot)
+setup_moderation_commands(bot)
 
 
 if __name__ == "__main__":

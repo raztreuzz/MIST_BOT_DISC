@@ -2,8 +2,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app.music import create_audio_source
 from app.emojis import MIST_HELLO, MIST_BYE, MIST_MUSIC
+from app.playback import playback_manager
 
 
 def setup_music_commands(bot: commands.Bot) -> None:
@@ -48,13 +48,13 @@ def setup_music_commands(bot: commands.Bot) -> None:
         if voice_client is None:
             voice_client = await interaction.user.voice.channel.connect()
 
+        # Use playback manager to handle repeat and scheduling
         if voice_client.is_playing():
             voice_client.stop()
 
-        source, title = create_audio_source(url)
+        playback_manager.play(interaction.guild.id, voice_client, url)
+        await interaction.followup.send(f"{MIST_MUSIC} Reproduciendo: {url}")
 
-        voice_client.play(source)
-        await interaction.followup.send(f"{MIST_MUSIC} Reproduciendo: {title}")
 
     @bot.tree.command(name="pause", description="Pausa la canción actual")
     async def pause(interaction: discord.Interaction):
@@ -84,7 +84,30 @@ def setup_music_commands(bot: commands.Bot) -> None:
 
         if voice_client:
             voice_client.stop()
+            playback_manager.clear_current(interaction.guild.id)
             await interaction.response.send_message("Detenido.")
             return
 
         await interaction.response.send_message("MIST no está en un canal de voz.")
+
+
+    @bot.tree.command(name="repeat", description="Activa/desactiva la repetición de la pista actual")
+    @app_commands.describe(mode="on/off/toggle")
+    async def repeat(interaction: discord.Interaction, mode: str = "toggle"):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.")
+            return
+
+        guild_id = interaction.guild.id
+        mode = mode.lower()
+        if mode not in ("on", "off", "toggle"):
+            await interaction.response.send_message("Modo inválido. Usá `on`, `off` o `toggle`.")
+            return
+
+        if mode == "toggle":
+            new = not playback_manager.is_repeat(guild_id)
+        else:
+            new = (mode == "on")
+
+        playback_manager.set_repeat(guild_id, new)
+        await interaction.response.send_message(f"Repetición {'activada' if new else 'desactivada'}.")
