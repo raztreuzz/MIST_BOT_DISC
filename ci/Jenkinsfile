@@ -3,6 +3,7 @@ pipeline {
 
 	triggers {
 		githubPush()
+		pollSCM('H/5 * * * *')
 	}
 
 	environment {
@@ -23,7 +24,7 @@ pipeline {
 		stage('Validar Parametros') {
 			steps {
 				script {
-					env.DEPLOY_BRANCH = params.BRANCH_NAME?.trim() ? params.BRANCH_NAME.trim() : 'main'
+					env.DEPLOY_BRANCH = env.BRANCH_NAME?.trim() ? env.BRANCH_NAME.trim() : (params.BRANCH_NAME?.trim() ? params.BRANCH_NAME.trim() : 'main')
 				}
 				sh '''
 				  set -eu
@@ -48,9 +49,6 @@ pipeline {
 		}
 
 		stage('Crear Inventario y Desplegar') {
-			when {
-				branch 'main'
-			}
 			steps {
 				withCredentials([
 					file(credentialsId: env.ENV_FILE_ID, variable: 'ENV_FILE'),
