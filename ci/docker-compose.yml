@@ -1,0 +1,12 @@
+services:
+  mist-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${MIST_IMAGE:-mist-bot:latest}
+    container_name: mist-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
