@@ -111,3 +111,5 @@ def setup_music_commands(bot: commands.Bot) -> None:
 
         playback_manager.set_repeat(guild_id, new)
         await interaction.response.send_message(f"Repetición {'activada' if new else 'desactivada'}.")
+
+    # Note: YouTube search command removed per user request.
