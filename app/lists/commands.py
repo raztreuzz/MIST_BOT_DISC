@@ -8,6 +8,22 @@ from app.music import create_audio_source
 from app.config import CIRCLE_ROLE_NAME
 
 
+async def _get_member_roles_json(interaction: discord.Interaction) -> tuple:
+    """Helper to fetch member and return (member, roles_json) tuple."""
+    member = interaction.guild.get_member(interaction.user.id)
+    if member is None:
+        try:
+            member = await interaction.guild.fetch_member(interaction.user.id)
+        except Exception:
+            member = interaction.user
+
+    role_objs = getattr(member, 'roles', [])
+    role_names = [r.name for r in role_objs if getattr(r, 'name', '') != '@everyone']
+    role_ids = [r.id for r in role_objs if getattr(r, 'id', None) is not None and getattr(r, 'name', '') != '@everyone']
+    roles_json = json.dumps({'ids': role_ids, 'names': role_names})
+    return member, roles_json
+
+
 def setup_lists_commands(bot: commands.Bot) -> None:
     @bot.tree.command(name="list_create", description="Crea una lista guardada")
     @app_commands.describe(name="Nombre de la lista", kind="Tipo de lista")
@@ -15,18 +31,9 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("Este comando solo funciona en un servidor.")
             return
-        # Fetch member reliably and capture roles as JSON
-        member = interaction.guild.get_member(interaction.user.id)
-        if member is None:
-            try:
-                member = await interaction.guild.fetch_member(interaction.user.id)
-            except Exception:
-                member = interaction.user
-
-        role_objs = getattr(member, 'roles', [])
-        role_names = [r.name for r in role_objs if getattr(r, 'name', '') != '@everyone']
-        role_ids = [r.id for r in role_objs if getattr(r, 'id', None) is not None and getattr(r, 'name', '') != '@everyone']
-        roles_json = json.dumps({'ids': role_ids, 'names': role_names})
+        
+        member, roles_json = await _get_member_roles_json(interaction)
+        role_names = json.loads(roles_json).get('names', [])
 
         if CIRCLE_ROLE_NAME not in role_names:
             await interaction.response.send_message(f"No tenés permiso para crear listas. Se requiere el rol '{CIRCLE_ROLE_NAME}'.")
@@ -47,19 +54,8 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         if interaction.guild is None:
             await interaction.response.send_message("Este comando solo funciona en un servidor.")
             return
-        # ensure user recorded (fetch roles)
-        member = interaction.guild.get_member(interaction.user.id)
-        if member is None:
-            try:
-                member = await interaction.guild.fetch_member(interaction.user.id)
-            except Exception:
-                member = interaction.user
-
-        role_objs = getattr(member, 'roles', [])
-        role_names = [r.name for r in role_objs if getattr(r, 'name', '') != '@everyone']
-        role_ids = [r.id for r in role_objs if getattr(r, 'id', None) is not None and getattr(r, 'name', '') != '@everyone']
-        roles_json = json.dumps({'ids': role_ids, 'names': role_names})
-
+        
+        member, roles_json = await _get_member_roles_json(interaction)
         ensure_user(interaction.guild.id, interaction.user.id, getattr(member, 'display_name', None), roles_json)
 
         added = add_to_list(interaction.guild.id, name, url)
@@ -125,18 +121,7 @@ def setup_lists_commands(bot: commands.Bot) -> None:
             await interaction.response.send_message("Este comando solo funciona en un servidor.")
             return
 
-        member = interaction.guild.get_member(interaction.user.id)
-        if member is None:
-            try:
-                member = await interaction.guild.fetch_member(interaction.user.id)
-            except Exception:
-                member = interaction.user
-
-        role_objs = getattr(member, 'roles', [])
-        role_names = [r.name for r in role_objs if getattr(r, 'name', '') != '@everyone']
-        role_ids = [r.id for r in role_objs if getattr(r, 'id', None) is not None and getattr(r, 'name', '') != '@everyone']
-        roles_json = json.dumps({'ids': role_ids, 'names': role_names})
-
+        member, roles_json = await _get_member_roles_json(interaction)
         ensure_user(interaction.guild.id, interaction.user.id, getattr(member, 'display_name', None), roles_json)
 
         # split by newline or comma
