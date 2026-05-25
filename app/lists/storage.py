@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+from types import SimpleNamespace
 
 from sqlalchemy import (
     create_engine,
@@ -119,19 +120,14 @@ def migrate_roles_csv_to_json() -> int:
     return updated
 
 
-def get_list(guild_id: int, name: str) -> Optional[SavedList]:
+def get_list(guild_id: int, name: str) -> Optional[SimpleNamespace]:
     with _Session() as s:
         lst = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()
         if not lst:
             return None
         # load items
         items = [item.url for item in sorted(lst.items, key=lambda i: i.position)]
-        # return a lightweight object similar to previous SavedList dataclass
-        result = SavedList()
-        result.name = lst.name
-        result.kind = lst.kind
-        result.items = items
-        return result
+        return SimpleNamespace(name=lst.name, kind=lst.kind, items=items)
 
 
 def list_lists(guild_id: int) -> list:
@@ -140,9 +136,5 @@ def list_lists(guild_id: int) -> list:
         result = []
         for r in rows:
             items = [item.url for item in sorted(r.items, key=lambda i: i.position)]
-            obj = SavedList()
-            obj.name = r.name
-            obj.kind = r.kind
-            obj.items = items
-            result.append(obj)
+            result.append(SimpleNamespace(name=r.name, kind=r.kind, items=items))
         return result
