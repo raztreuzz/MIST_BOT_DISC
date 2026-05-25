@@ -2,7 +2,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app.emojis import MIST_HELLO, MIST_BYE, MIST_MUSIC
 from app.playback import playback_manager
 
 
@@ -21,7 +20,7 @@ def setup_music_commands(bot: commands.Bot) -> None:
             return
 
         await channel.connect()
-        await interaction.response.send_message(f"{MIST_HELLO} Entré al canal de voz.")
+        await interaction.response.send_message("Entré al canal de voz.")
 
     @bot.tree.command(name="leave", description="Mist sale del canal de voz")
     async def leave(interaction: discord.Interaction):
@@ -32,7 +31,7 @@ def setup_music_commands(bot: commands.Bot) -> None:
             return
 
         await voice_client.disconnect()
-        await interaction.response.send_message(f"{MIST_BYE} Salí del canal de voz.")
+        await interaction.response.send_message("Salí del canal de voz.")
 
     @bot.tree.command(name="play", description="Reproduce audio desde un link de YouTube")
     @app_commands.describe(url="Link de YouTube")
@@ -53,7 +52,7 @@ def setup_music_commands(bot: commands.Bot) -> None:
             voice_client.stop()
 
         playback_manager.play(interaction.guild.id, voice_client, url)
-        await interaction.followup.send(f"{MIST_MUSIC} Reproduciendo: {url}")
+        await interaction.followup.send(f"Reproduciendo: {url}")
 
 
     @bot.tree.command(name="pause", description="Pausa la canción actual")

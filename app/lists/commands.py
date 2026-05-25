@@ -5,7 +5,6 @@ import json
 
 from app.lists.storage import add_to_list, create_list, get_list, list_lists, ensure_user
 from app.music import create_audio_source
-from app.emojis import MIST_HELLO, MIST_MUSIC
 from app.config import CIRCLE_ROLE_NAME
 
 
@@ -40,7 +39,7 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         if not created:
             await interaction.response.send_message("Ya existe una lista con ese nombre.")
             return
-        await interaction.response.send_message(f"{MIST_HELLO} Hola {interaction.user.display_name}, lista creada: {name} ({kind}).\nSi querés agregar varias canciones ahora, usá `/list_add_bulk` con una lista de URLs separadas por comas o saltos de línea.")
+        await interaction.response.send_message(f"Hola {interaction.user.display_name}, lista creada: {name} ({kind}).\nSi querés agregar varias canciones ahora, usá `/list_add_bulk` con una lista de URLs separadas por comas o saltos de línea.")
 
     @bot.tree.command(name="list_add", description="Agrega un link a una lista guardada")
     @app_commands.describe(name="Nombre de la lista", url="Link de YouTube")
@@ -68,7 +67,7 @@ def setup_lists_commands(bot: commands.Bot) -> None:
             await interaction.response.send_message("No existe una lista con ese nombre.")
             return
         
-        await interaction.response.send_message(f"{MIST_HELLO} Agregado a {name}.")
+        await interaction.response.send_message(f"Agregado a {name}.")
 
     @bot.tree.command(name="list_show", description="Muestra las listas guardadas")
     async def list_show(interaction: discord.Interaction):
@@ -117,7 +116,7 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         source, title = create_audio_source(first_url)
         voice_client.play(source)
         
-        await interaction.followup.send(f"{MIST_MUSIC} Reproduciendo {saved_list.name}: {title}")
+        await interaction.followup.send(f"Reproduciendo {saved_list.name}: {title}")
 
     @bot.tree.command(name="list_add_bulk", description="Agrega varios links a una lista (separados por comas o saltos de línea)")
     @app_commands.describe(name="Nombre de la lista", urls="URLs separadas por comas o saltos de línea")
