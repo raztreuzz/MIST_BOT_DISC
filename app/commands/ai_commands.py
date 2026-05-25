@@ -21,7 +21,7 @@ def setup_ai_commands(bot: commands.Bot) -> None:
             )
             return
 
-        result = generate(prompt, model=model_to_use, timeout=30)
+        result = await generate(prompt, model=model_to_use, timeout=60)
 
         # If the result is long, send as a followup message (discord limits apply)
         try:
