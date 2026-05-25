@@ -1,5 +1,4 @@
-from app.lists.models import SavedList
-from app.lists.storage import add_to_list, create_list, get_list, list_lists
+from app.lists.storage import add_to_list, create_list, get_list, list_lists, SavedList
 from app.lists.commands import setup_lists_commands
 
 __all__ = [
