@@ -1,11 +1,13 @@
+import asyncio
 import json
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from app.ai.mist_voice import mist_command_reply
 from app.config import CIRCLE_ROLE_NAME
-from app.lists.storage import add_to_list, create_list, ensure_user, get_list, list_lists
+from app.lists.storage import add_to_list, create_list, delete_list, ensure_user, get_list, list_lists, storage_stats
 from app.music import extract_playlist_urls
 from app.playback import playback_manager
 
@@ -27,6 +29,20 @@ async def _get_member_roles_json(interaction: discord.Interaction) -> tuple:
 
 
 def setup_lists_commands(bot: commands.Bot) -> None:
+    async def _mist(action: str, fallback: str, details: dict | None = None) -> str:
+        return await mist_command_reply(action, fallback, details)
+
+    async def _has_list_access(interaction: discord.Interaction) -> bool:
+        member, roles_json = await _get_member_roles_json(interaction)
+        role_names = json.loads(roles_json).get("names", [])
+        permissions = getattr(member, "guild_permissions", None)
+        can_manage = bool(
+            getattr(permissions, "manage_guild", False)
+            or getattr(permissions, "manage_messages", False)
+            or getattr(permissions, "administrator", False)
+        )
+        return can_manage or CIRCLE_ROLE_NAME in role_names
+
     @bot.tree.command(name="list_create", description="Crea una lista de canciones")
     @app_commands.describe(nombre="Nombre de la lista")
     async def list_create_command(interaction: discord.Interaction, nombre: str):
@@ -47,10 +63,12 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         if not created:
             await interaction.response.send_message("Ya existe una lista con ese nombre.")
             return
-        await interaction.response.send_message(
+        await interaction.response.defer()
+        fallback = (
             f"Lista creada: {nombre}.\n"
             f"Ahora agregá links con `/list_add nombre:{nombre} url:<link de YouTube>`."
         )
+        await interaction.followup.send(await _mist("list_create", fallback, {"lista": nombre}))
 
     @bot.tree.command(name="list_add", description="Agrega un link de YouTube a una lista")
     @app_commands.describe(nombre="Nombre de la lista", url="Link de YouTube")
@@ -67,7 +85,33 @@ def setup_lists_commands(bot: commands.Bot) -> None:
             await interaction.response.send_message("No existe una lista con ese nombre.")
             return
 
-        await interaction.response.send_message(f"Agregado a {nombre}.")
+        await interaction.response.defer()
+        await interaction.followup.send(await _mist("list_add", f"Agregado a {nombre}.", {"lista": nombre}))
+
+    @bot.tree.command(name="list_add_current", description="Agrega la canción actual a una lista")
+    @app_commands.describe(nombre="Nombre de la lista")
+    async def list_add_current(interaction: discord.Interaction, nombre: str):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.")
+            return
+
+        current_url = playback_manager.get_current(interaction.guild.id)
+        if not current_url:
+            await interaction.response.send_message("No hay una canción actual para guardar.")
+            return
+
+        member, roles_json = await _get_member_roles_json(interaction)
+        ensure_user(interaction.guild.id, interaction.user.id, getattr(member, "display_name", None), roles_json)
+
+        added = add_to_list(interaction.guild.id, nombre, current_url)
+        if not added:
+            await interaction.response.send_message("No existe una lista con ese nombre.")
+            return
+
+        current_title = playback_manager.get_current_title(interaction.guild.id) or current_url
+        await interaction.response.defer()
+        fallback = f"Guardé en {nombre}: {current_title}"
+        await interaction.followup.send(await _mist("list_add_current", fallback, {"lista": nombre, "titulo": current_title}))
 
     @bot.tree.command(name="list_add_playlist", description="Importa una playlist de YouTube completa a una lista guardada")
     @app_commands.describe(nombre="Nombre de la lista", playlist_url="Link de la playlist de YouTube")
@@ -82,7 +126,7 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         await interaction.response.defer()
 
         try:
-            urls, playlist_title = extract_playlist_urls(playlist_url)
+            urls, playlist_title = await asyncio.to_thread(extract_playlist_urls, playlist_url)
         except Exception as exc:
             await interaction.followup.send(f"No pude leer la playlist: {exc}")
             return
@@ -100,9 +144,16 @@ def setup_lists_commands(bot: commands.Bot) -> None:
             await interaction.followup.send(f"No pude agregar canciones a {nombre}.")
             return
 
-        await interaction.followup.send(
+        fallback = (
             f"Importé {added} canciones de '{playlist_title}' a {nombre}.\n"
             f"Si querés sumar un link suelto, usá `/list_add`."
+        )
+        await interaction.followup.send(
+            await _mist(
+                "list_add_playlist",
+                fallback,
+                {"lista": nombre, "playlist": playlist_title, "canciones": added},
+            )
         )
 
     @bot.tree.command(name="list_show", description="Muestra las listas guardadas")
@@ -118,6 +169,58 @@ def setup_lists_commands(bot: commands.Bot) -> None:
 
         lines = [f"{sl.name}: {len(sl.items)} canciones" for sl in lists]
         await interaction.response.send_message("\n".join(lines))
+
+    @bot.tree.command(name="list_delete", description="Borra una lista guardada")
+    @app_commands.describe(nombre="Nombre de la lista", confirmar="Debe ser true para borrar")
+    async def list_delete(interaction: discord.Interaction, nombre: str, confirmar: bool = False):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.")
+            return
+
+        if not await _has_list_access(interaction):
+            await interaction.response.send_message(f"No tenés permiso para borrar listas. Se requiere el rol '{CIRCLE_ROLE_NAME}'.")
+            return
+
+        saved_list = get_list(interaction.guild.id, nombre)
+        if saved_list is None:
+            await interaction.response.send_message("No existe una lista con ese nombre.")
+            return
+
+        if not confirmar:
+            await interaction.response.send_message(
+                f"La lista {nombre} tiene {len(saved_list.items)} canciones. "
+                f"Para borrarla usá `/list_delete nombre:{nombre} confirmar:true`."
+            )
+            return
+
+        await interaction.response.defer()
+        deleted_items = delete_list(interaction.guild.id, nombre)
+        if deleted_items is None:
+            await interaction.followup.send("No existe una lista con ese nombre.")
+            return
+
+        fallback = f"Lista {nombre} borrada. Se eliminaron {deleted_items} canciones guardadas."
+        await interaction.followup.send(await _mist("list_delete", fallback, {"lista": nombre, "canciones": deleted_items}))
+
+    @bot.tree.command(name="persist_status", description="Revisa conteos guardados en la base de datos")
+    async def persist_status(interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.", ephemeral=True)
+            return
+
+        if not await _has_list_access(interaction):
+            await interaction.response.send_message("No tenés permiso para revisar persistencia.", ephemeral=True)
+            return
+
+        stats = storage_stats(interaction.guild.id)
+        await interaction.response.send_message(
+            "Persistencia activa.\n"
+            f"Listas: {stats.lists}\n"
+            f"Canciones guardadas: {stats.items}\n"
+            f"Usuarios registrados: {stats.users}\n"
+            f"Preguntas registradas: {stats.ai_logs}",
+            ephemeral=True,
+        )
 
     @bot.tree.command(name="list_play", description="Reproduce una lista guardada")
     @app_commands.describe(nombre="Nombre de la lista")
@@ -162,12 +265,19 @@ def setup_lists_commands(bot: commands.Bot) -> None:
 
         remaining = len(saved_list.items) - 1
         if remaining:
-            await interaction.followup.send(
+            fallback = (
                 f"Lista {saved_list.name} iniciada: {title}\n"
                 f"Posición: 1/{len(saved_list.items)}. En cola: {remaining} canciones."
             )
         else:
-            await interaction.followup.send(f"Lista {saved_list.name} iniciada: {title}")
+            fallback = f"Lista {saved_list.name} iniciada: {title}"
+        await interaction.followup.send(
+            await _mist(
+                "list_play",
+                fallback,
+                {"lista": saved_list.name, "titulo": title, "total": len(saved_list.items), "pendientes": remaining},
+            )
+        )
 
     @bot.tree.command(name="list_add_bulk", description="Agrega varios links de YouTube a una lista")
     @app_commands.describe(nombre="Nombre de la lista", links="Pega varios links separados por comas o saltos de línea")
@@ -189,4 +299,6 @@ def setup_lists_commands(bot: commands.Bot) -> None:
             if add_to_list(interaction.guild.id, nombre, u):
                 added += 1
 
-        await interaction.response.send_message(f"Agregados {added} links a {nombre}.")
+        await interaction.response.defer()
+        fallback = f"Agregados {added} links a {nombre}."
+        await interaction.followup.send(await _mist("list_add_bulk", fallback, {"lista": nombre, "links": added}))
