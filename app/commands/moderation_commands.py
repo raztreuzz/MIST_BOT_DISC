@@ -3,13 +3,14 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 
+from app.ai.mist_voice import mist_command_reply
 from app.config import CIRCLE_ROLE_NAME
 
 
 def setup_moderation_commands(bot: commands.Bot) -> None:
     @bot.tree.command(name="purge", description="Borra mensajes del canal (máx 100).")
-    @app_commands.describe(amount="Cantidad de mensajes a borrar (1-100)", user="Opcional: usuario cuyo mensajes borrar")
-    async def purge(interaction: discord.Interaction, amount: int, user: Optional[discord.Member] = None):
+    @app_commands.describe(cantidad="Cantidad de mensajes a borrar (1-100)", usuario="Opcional: borrar solo mensajes de este usuario")
+    async def purge(interaction: discord.Interaction, cantidad: int, usuario: Optional[discord.Member] = None):
         # Basic checks
         if interaction.guild is None:
             await interaction.response.send_message("Este comando solo funciona en servidores.", ephemeral=True)
@@ -29,8 +30,8 @@ def setup_moderation_commands(bot: commands.Bot) -> None:
             await interaction.response.send_message("No tenés permiso para borrar mensajes.", ephemeral=True)
             return
 
-        if amount < 1 or amount > 100:
-            await interaction.response.send_message("El parámetro `amount` debe estar entre 1 y 100.", ephemeral=True)
+        if cantidad < 1 or cantidad > 100:
+            await interaction.response.send_message("La cantidad debe estar entre 1 y 100.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -41,12 +42,14 @@ def setup_moderation_commands(bot: commands.Bot) -> None:
             return
 
         def check(m: discord.Message) -> bool:
-            if user is None:
+            if usuario is None:
                 return True
-            return m.author.id == user.id
+            return m.author.id == usuario.id
 
         try:
-            deleted = await channel.purge(limit=amount, check=check)
-            await interaction.followup.send(f"Borrados {len(deleted)} mensajes.", ephemeral=True)
+            deleted = await channel.purge(limit=cantidad, check=check)
+            fallback = f"Borrados {len(deleted)} mensajes."
+            message = await mist_command_reply("purge", fallback, {"mensajes": len(deleted)})
+            await interaction.followup.send(message, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error al borrar mensajes: {e}", ephemeral=True)

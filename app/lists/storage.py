@@ -1,193 +1,232 @@
-import sqlite3
 from pathlib import Path
+from typing import Optional
+from types import SimpleNamespace
 
-from app.lists.models import SavedList
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Text,
+    ForeignKey,
+    DateTime,
+    func,
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
+from app.config import DATABASE_URL
 
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "mist.sqlite3"
-
-
-def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def _init_db(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS saved_lists (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            creator_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(guild_id, name)
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS list_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            list_id INTEGER NOT NULL,
-            url TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            FOREIGN KEY(list_id) REFERENCES saved_lists(id) ON DELETE CASCADE
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            guild_id INTEGER NOT NULL,
-            discord_id INTEGER NOT NULL,
-            display_name TEXT,
-            roles TEXT,
-            UNIQUE(guild_id, discord_id)
-        )
-        """
-    )
-    connection.commit()
+Base = declarative_base()
 
 
-def create_list(guild_id: int, name: str, kind: str, creator_id: int | None = None) -> bool:
-    """Create a named list for a guild. Optionally record the creator's discord id."""
-    with _connect() as connection:
-        _init_db(connection)
-        try:
-            connection.execute(
-                "INSERT INTO saved_lists (guild_id, name, kind, creator_id) VALUES (?, ?, ?, ?)",
-                (guild_id, name, kind, creator_id),
-            )
-            connection.commit()
-            return True
-        except sqlite3.IntegrityError:
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer, index=True, nullable=False)
+    discord_id = Column(Integer, nullable=False)
+    display_name = Column(String(200))
+    roles = Column(Text)
+
+
+class SavedList(Base):
+    __tablename__ = "saved_lists"
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer, index=True, nullable=False)
+    name = Column(String(200), nullable=False)
+    kind = Column(String(50), nullable=False)
+    creator_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    items = relationship("ListItem", back_populates="saved_list", cascade="all, delete-orphan")
+
+
+class ListItem(Base):
+    __tablename__ = "list_items"
+    id = Column(Integer, primary_key=True)
+    list_id = Column(Integer, ForeignKey("saved_lists.id", ondelete="CASCADE"), nullable=False)
+    url = Column(Text, nullable=False)
+    position = Column(Integer, nullable=False)
+    saved_list = relationship("SavedList", back_populates="items")
+
+
+class AiInteraction(Base):
+    __tablename__ = "ai_interactions"
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(Integer, index=True, nullable=False)
+    channel_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, nullable=False)
+    display_name = Column(String(200), nullable=True)
+    model = Column(String(200), nullable=True)
+    prompt = Column(Text, nullable=False)
+    response = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# create engine and session
+_engine = create_engine(DATABASE_URL, future=True)
+_Session = sessionmaker(bind=_engine, expire_on_commit=False)
+
+# ensure tables exist
+Base.metadata.create_all(_engine)
+
+
+# Storage API
+
+def create_list(guild_id: int, name: str, kind: str, creator_id: Optional[int] = None) -> bool:
+    with _Session() as s:
+        existing = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()
+        if existing:
             return False
-
-
-def add_to_list(guild_id: int, name: str, url: str) -> bool:
-    with _connect() as connection:
-        _init_db(connection)
-        list_row = connection.execute(
-            "SELECT id FROM saved_lists WHERE guild_id = ? AND name = ?",
-            (guild_id, name),
-        ).fetchone()
-
-        if list_row is None:
-            return False
-
-        next_position_row = connection.execute(
-            "SELECT COALESCE(MAX(position), 0) + 1 AS next_position FROM list_items WHERE list_id = ?",
-            (list_row["id"],),
-        ).fetchone()
-
-        connection.execute(
-            "INSERT INTO list_items (list_id, url, position) VALUES (?, ?, ?)",
-            (list_row["id"], url, next_position_row["next_position"]),
-        )
-        connection.commit()
+        lst = SavedList(guild_id=guild_id, name=name, kind=kind, creator_id=creator_id)
+        s.add(lst)
+        s.commit()
         return True
 
 
-def ensure_user(guild_id: int, discord_id: int, display_name: str | None = None, roles: str | None = None) -> None:
-    """Insert or update a user profile for quick lookups."""
-    with _connect() as connection:
-        _init_db(connection)
-        connection.execute(
-            "INSERT INTO users (guild_id, discord_id, display_name, roles) VALUES (?, ?, ?, ?)"
-            " ON CONFLICT(guild_id, discord_id) DO UPDATE SET display_name=excluded.display_name, roles=excluded.roles",
-            (guild_id, discord_id, display_name, roles),
-        )
-        connection.commit()
+def add_to_list(guild_id: int, name: str, url: str) -> bool:
+    with _Session() as s:
+        lst = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()
+        if lst is None:
+            return False
+        max_pos = s.query(func.coalesce(func.max(ListItem.position), 0)).filter(ListItem.list_id == lst.id).scalar()
+        item = ListItem(list_id=lst.id, url=url, position=(max_pos or 0) + 1)
+        s.add(item)
+        s.commit()
+        return True
 
 
-def get_user(guild_id: int, discord_id: int) -> dict | None:
-    with _connect() as connection:
-        _init_db(connection)
-        row = connection.execute(
-            "SELECT discord_id, display_name, roles FROM users WHERE guild_id = ? AND discord_id = ?",
-            (guild_id, discord_id),
-        ).fetchone()
-        if row is None:
+def delete_list(guild_id: int, name: str) -> Optional[int]:
+    with _Session() as s:
+        lst = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()
+        if lst is None:
             return None
-        return {"discord_id": row["discord_id"], "display_name": row["display_name"], "roles": row["roles"]}
+        item_count = len(lst.items)
+        s.delete(lst)
+        s.commit()
+        return item_count
+
+
+def ensure_user(guild_id: int, discord_id: int, display_name: Optional[str] = None, roles: Optional[str] = None) -> None:
+    with _Session() as s:
+        user = s.query(User).filter_by(guild_id=guild_id, discord_id=discord_id).first()
+        if user:
+            user.display_name = display_name
+            user.roles = roles
+        else:
+            user = User(guild_id=guild_id, discord_id=discord_id, display_name=display_name, roles=roles)
+            s.add(user)
+        s.commit()
+
+
+def get_user(guild_id: int, discord_id: int) -> Optional[dict]:
+    with _Session() as s:
+        user = s.query(User).filter_by(guild_id=guild_id, discord_id=discord_id).first()
+        if not user:
+            return None
+        return {"discord_id": user.discord_id, "display_name": user.display_name, "roles": user.roles}
 
 
 def migrate_roles_csv_to_json() -> int:
-    """Migrate users.roles stored as CSV of names to JSON {ids:[], names:[]}.
-
-    Returns the number of rows updated.
-    """
-    import json
-
     updated = 0
-    with _connect() as connection:
-        _init_db(connection)
-        rows = connection.execute("SELECT guild_id, discord_id, roles FROM users WHERE roles IS NOT NULL AND roles != ''").fetchall()
-        for row in rows:
-            raw = row["roles"]
-            # Skip if already JSON (starts with [ or {)
-            if raw.strip().startswith(('{', '[')):
+    with _Session() as s:
+        users = s.query(User).filter(User.roles != None).all()
+        for user in users:
+            raw = (user.roles or "").strip()
+            if not raw:
                 continue
-            # assume CSV of role names
-            parts = [p.strip() for p in raw.split(',') if p.strip()]
-            roles_json = json.dumps({"ids": [], "names": parts}, ensure_ascii=False)
-            connection.execute(
-                "UPDATE users SET roles = ? WHERE guild_id = ? AND discord_id = ?",
-                (roles_json, row["guild_id"], row["discord_id"]),
-            )
+            if raw.startswith("{") or raw.startswith("["):
+                continue
+            parts = [p.strip() for p in raw.split(",") if p.strip()]
+            import json
+
+            user.roles = json.dumps({"ids": [], "names": parts}, ensure_ascii=False)
             updated += 1
-        connection.commit()
+        s.commit()
     return updated
 
 
-def get_list(guild_id: int, name: str) -> SavedList | None:
-    with _connect() as connection:
-        _init_db(connection)
-        list_row = connection.execute(
-            "SELECT id, name, kind FROM saved_lists WHERE guild_id = ? AND name = ?",
-            (guild_id, name),
-        ).fetchone()
-
-        if list_row is None:
+def get_list(guild_id: int, name: str) -> Optional[SimpleNamespace]:
+    with _Session() as s:
+        lst = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()
+        if not lst:
             return None
-
-        items = connection.execute(
-            "SELECT url FROM list_items WHERE list_id = ? ORDER BY position ASC",
-            (list_row["id"],),
-        ).fetchall()
-
-        return SavedList(
-            name=list_row["name"],
-            kind=list_row["kind"],
-            items=[item["url"] for item in items],
-        )
+        # load items
+        items = [item.url for item in sorted(lst.items, key=lambda i: i.position)]
+        return SimpleNamespace(name=lst.name, kind=lst.kind, items=items)
 
 
-def list_lists(guild_id: int) -> list[SavedList]:
-    with _connect() as connection:
-        _init_db(connection)
-        rows = connection.execute(
-            "SELECT id, name, kind FROM saved_lists WHERE guild_id = ? ORDER BY name ASC",
-            (guild_id,),
-        ).fetchall()
-
-        result: list[SavedList] = []
-        for list_row in rows:
-            items = connection.execute(
-                "SELECT url FROM list_items WHERE list_id = ? ORDER BY position ASC",
-                (list_row["id"],),
-            ).fetchall()
-            result.append(
-                SavedList(
-                    name=list_row["name"],
-                    kind=list_row["kind"],
-                    items=[item["url"] for item in items],
-                )
-            )
-
+def list_lists(guild_id: int) -> list:
+    with _Session() as s:
+        rows = s.query(SavedList).filter_by(guild_id=guild_id).order_by(SavedList.name.asc()).all()
+        result = []
+        for r in rows:
+            items = [item.url for item in sorted(r.items, key=lambda i: i.position)]
+            result.append(SimpleNamespace(name=r.name, kind=r.kind, items=items))
         return result
+
+
+def record_ai_interaction(
+    guild_id: int,
+    channel_id: Optional[int],
+    user_id: int,
+    display_name: Optional[str],
+    model: Optional[str],
+    prompt: str,
+    response: Optional[str] = None,
+    error: Optional[str] = None,
+) -> None:
+    with _Session() as s:
+        row = AiInteraction(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=user_id,
+            display_name=display_name,
+            model=model,
+            prompt=prompt[:2000],
+            response=response[:4000] if response else None,
+            error=error[:1000] if error else None,
+        )
+        s.add(row)
+        s.commit()
+
+
+def recent_ai_interactions(guild_id: int, limit: int = 10) -> list:
+    limit = max(1, min(limit, 25))
+    with _Session() as s:
+        rows = (
+            s.query(AiInteraction)
+            .filter_by(guild_id=guild_id)
+            .order_by(AiInteraction.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            SimpleNamespace(
+                id=row.id,
+                channel_id=row.channel_id,
+                user_id=row.user_id,
+                display_name=row.display_name,
+                model=row.model,
+                prompt=row.prompt,
+                response=row.response,
+                error=row.error,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+
+def storage_stats(guild_id: int) -> SimpleNamespace:
+    with _Session() as s:
+        lists_count = s.query(SavedList).filter_by(guild_id=guild_id).count()
+        list_ids = [row.id for row in s.query(SavedList.id).filter_by(guild_id=guild_id).all()]
+        items_count = s.query(ListItem).filter(ListItem.list_id.in_(list_ids)).count() if list_ids else 0
+        users_count = s.query(User).filter_by(guild_id=guild_id).count()
+        ai_logs_count = s.query(AiInteraction).filter_by(guild_id=guild_id).count()
+        return SimpleNamespace(
+            lists=lists_count,
+            items=items_count,
+            users=users_count,
+            ai_logs=ai_logs_count,
+            database_url=DATABASE_URL,
+        )

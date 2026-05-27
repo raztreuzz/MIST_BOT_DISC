@@ -1,12 +1,29 @@
 services:
   mist-bot:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     image: ${MIST_IMAGE:-mist-bot:latest}
     container_name: mist-bot
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
     volumes:
-      - ./data:/app/data
+      - ../data:/app/data
+  db:
+    image: postgres:15
+    container_name: mist-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mistpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-mist}
+    volumes:
+      - ../data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mist}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
