@@ -44,6 +44,7 @@ pipeline {
 				  python -m pip install poetry
 				  poetry install --no-root
 				  poetry run python -m compileall app
+				  poetry run python -m unittest discover -s tests
 				'''
 			}
 		}

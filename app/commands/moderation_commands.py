@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 
+from app.ai.mist_voice import mist_command_reply
 from app.config import CIRCLE_ROLE_NAME
 
 
@@ -47,6 +48,8 @@ def setup_moderation_commands(bot: commands.Bot) -> None:
 
         try:
             deleted = await channel.purge(limit=cantidad, check=check)
-            await interaction.followup.send(f"Borrados {len(deleted)} mensajes.", ephemeral=True)
+            fallback = f"Borrados {len(deleted)} mensajes."
+            message = await mist_command_reply("purge", fallback, {"mensajes": len(deleted)})
+            await interaction.followup.send(message, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"Error al borrar mensajes: {e}", ephemeral=True)
