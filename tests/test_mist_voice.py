@@ -1,4 +1,7 @@
+import os
 import unittest
+
+os.environ.setdefault("DISCORD_TOKEN", "test-token")
 
 from app.ai.mist_voice import _looks_unsafe
 
