@@ -44,16 +44,18 @@ class StorageTests(unittest.TestCase):
 
     def test_user_and_ai_log_stats(self):
         storage = self.storage
-        guild_id = 2002
+        guild_id = 1377499113808986266
+        user_id = 942904057205514290
+        channel_id = 1377499113808986267
 
-        storage.ensure_user(guild_id, 99, "Sara", '{"names":["Miembro"]}')
-        user = storage.get_user(guild_id, 99)
+        storage.ensure_user(guild_id, user_id, "Sara", '{"names":["Miembro"]}')
+        user = storage.get_user(guild_id, user_id)
         self.assertEqual(user["display_name"], "Sara")
 
         storage.record_ai_interaction(
             guild_id,
-            channel_id=10,
-            user_id=99,
+            channel_id=channel_id,
+            user_id=user_id,
             display_name="Sara",
             model="tinyllama",
             prompt="hola",

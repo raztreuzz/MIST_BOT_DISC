@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from sqlalchemy import (
     create_engine,
     Column,
+    BigInteger,
     Integer,
     String,
     Text,
@@ -22,8 +23,8 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
-    guild_id = Column(Integer, index=True, nullable=False)
-    discord_id = Column(Integer, nullable=False)
+    guild_id = Column(BigInteger, index=True, nullable=False)
+    discord_id = Column(BigInteger, nullable=False)
     display_name = Column(String(200))
     roles = Column(Text)
 
@@ -31,10 +32,10 @@ class User(Base):
 class SavedList(Base):
     __tablename__ = "saved_lists"
     id = Column(Integer, primary_key=True)
-    guild_id = Column(Integer, index=True, nullable=False)
+    guild_id = Column(BigInteger, index=True, nullable=False)
     name = Column(String(200), nullable=False)
     kind = Column(String(50), nullable=False)
-    creator_id = Column(Integer, nullable=True)
+    creator_id = Column(BigInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     items = relationship("ListItem", back_populates="saved_list", cascade="all, delete-orphan")
 
@@ -51,9 +52,9 @@ class ListItem(Base):
 class AiInteraction(Base):
     __tablename__ = "ai_interactions"
     id = Column(Integer, primary_key=True)
-    guild_id = Column(Integer, index=True, nullable=False)
-    channel_id = Column(Integer, nullable=True)
-    user_id = Column(Integer, nullable=False)
+    guild_id = Column(BigInteger, index=True, nullable=False)
+    channel_id = Column(BigInteger, nullable=True)
+    user_id = Column(BigInteger, nullable=False)
     display_name = Column(String(200), nullable=True)
     model = Column(String(200), nullable=True)
     prompt = Column(Text, nullable=False)
@@ -66,8 +67,28 @@ class AiInteraction(Base):
 _engine = create_engine(DATABASE_URL, future=True)
 _Session = sessionmaker(bind=_engine, expire_on_commit=False)
 
+
+def _ensure_bigint_columns() -> None:
+    if _engine.dialect.name != "postgresql":
+        return
+
+    statements = [
+        "ALTER TABLE users ALTER COLUMN guild_id TYPE BIGINT",
+        "ALTER TABLE users ALTER COLUMN discord_id TYPE BIGINT",
+        "ALTER TABLE saved_lists ALTER COLUMN guild_id TYPE BIGINT",
+        "ALTER TABLE saved_lists ALTER COLUMN creator_id TYPE BIGINT",
+        "ALTER TABLE ai_interactions ALTER COLUMN guild_id TYPE BIGINT",
+        "ALTER TABLE ai_interactions ALTER COLUMN channel_id TYPE BIGINT",
+        "ALTER TABLE ai_interactions ALTER COLUMN user_id TYPE BIGINT",
+    ]
+    with _engine.begin() as conn:
+        for statement in statements:
+            conn.exec_driver_sql(statement)
+
+
 # ensure tables exist
 Base.metadata.create_all(_engine)
+_ensure_bigint_columns()
 
 
 # Storage API
