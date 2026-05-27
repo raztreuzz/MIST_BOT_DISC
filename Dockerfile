@@ -5,9 +5,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Voice playback depends on ffmpeg.
+# Voice playback depends on ffmpeg. yt-dlp uses node as a JavaScript runtime for YouTube extraction.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir poetry
