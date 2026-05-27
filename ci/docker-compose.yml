@@ -1,15 +1,20 @@
 services:
   mist-bot:
     build:
-      context: ..
+      context: ${MIST_BUILD_CONTEXT:-.}
       dockerfile: Dockerfile
     image: ${MIST_IMAGE:-mist-bot:latest}
     container_name: mist-bot
     restart: unless-stopped
     env_file:
-      - ../.env
+      - ${MIST_ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-mist}:${POSTGRES_PASSWORD:-mistpassword}@db:5432/${POSTGRES_DB:-mist}}
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - ../data:/app/data
+      - ${MIST_DATA_DIR:-./data}:/app/data
   db:
     image: postgres:15
     container_name: mist-db
@@ -19,9 +24,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mistpassword}
       POSTGRES_DB: ${POSTGRES_DB:-mist}
     volumes:
-      - ../data/postgres:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - ${MIST_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mist}"]
       interval: 10s
