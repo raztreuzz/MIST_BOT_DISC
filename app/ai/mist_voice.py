@@ -9,6 +9,26 @@ MIST_COMMAND_SYSTEM = (
 )
 
 
+def _looks_unsafe(response: str) -> bool:
+    lowered = response.lower()
+    suspicious_terms = (
+        "responde como mist",
+        "respuesta base",
+        "comando:",
+        "datos:",
+        "instrucciones internas",
+        "prompt",
+        "ollama",
+        "modelo",
+        "openai",
+        "meta",
+        "no menciones",
+        "no repitas",
+        "personalidad",
+    )
+    return any(term in lowered for term in suspicious_terms)
+
+
 async def mist_command_reply(action: str, fallback: str, details: dict | None = None, timeout: int = 20) -> str:
     detail_lines = "\n".join(f"- {key}: {value}" for key, value in (details or {}).items() if value is not None)
     prompt = (
@@ -25,6 +45,6 @@ async def mist_command_reply(action: str, fallback: str, details: dict | None = 
         return fallback
 
     response = response.strip()
-    if not response or len(response) > 350:
+    if not response or len(response) > 350 or _looks_unsafe(response):
         return fallback
     return response
