@@ -46,6 +46,3 @@ env/
 *.db
 *.sqlite
 *.sqlite3
-
-# Bot specific
-poetry.lock
