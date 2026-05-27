@@ -8,7 +8,7 @@ from discord.ext import commands
 from app.ai.mist_voice import mist_command_reply
 from app.config import CIRCLE_ROLE_NAME
 from app.lists.storage import add_to_list, create_list, delete_list, ensure_user, get_list, list_lists, storage_stats
-from app.music import extract_playlist_urls
+from app.music import extract_playlist_urls, is_youtube_playlist_url, is_youtube_url
 from app.playback import playback_manager
 
 
@@ -79,6 +79,14 @@ def setup_lists_commands(bot: commands.Bot) -> None:
 
         member, roles_json = await _get_member_roles_json(interaction)
         ensure_user(interaction.guild.id, interaction.user.id, getattr(member, "display_name", None), roles_json)
+
+        if not is_youtube_url(url):
+            await interaction.response.send_message("Necesito un link de YouTube. Para buscar por nombre usá `/search`.")
+            return
+
+        if is_youtube_playlist_url(url):
+            await interaction.response.send_message("Ese link es una playlist. Usá `/list_add_playlist` para importarla completa.")
+            return
 
         added = add_to_list(interaction.guild.id, nombre, url)
         if not added:
@@ -290,6 +298,12 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         ensure_user(interaction.guild.id, interaction.user.id, getattr(member, "display_name", None), roles_json)
 
         parts = [p.strip() for p in links.replace('\r', '\n').replace(',', '\n').split('\n') if p.strip()]
+        invalid = [u for u in parts if not is_youtube_url(u) or is_youtube_playlist_url(u)]
+        if invalid:
+            await interaction.response.send_message(
+                "Encontré links inválidos o playlists. Para playlists usá `/list_add_playlist`."
+            )
+            return
         if not parts:
             await interaction.response.send_message("No se detectaron URLs en la entrada.")
             return

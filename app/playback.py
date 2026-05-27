@@ -125,7 +125,19 @@ class PlaybackManager:
                 self.clear_current(guild_id)
 
         async def _play_once() -> str:
-            source, title = await asyncio.to_thread(create_audio_source, url)
+            try:
+                source, title = await asyncio.to_thread(create_audio_source, url)
+            except Exception:
+                queue = state.get("queue") or []
+                if queue:
+                    next_url = queue.pop(0)
+                    playlist = state.get("playlist") or []
+                    try:
+                        next_index = playlist.index(next_url)
+                    except ValueError:
+                        next_index = index + 1
+                    return await self._start_url(guild_id, voice_client, next_url, generation, next_index)
+                raise
             self.set_current(guild_id, url)
             state["current_title"] = title
             state["current_index"] = index

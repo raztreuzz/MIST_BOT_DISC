@@ -1,4 +1,5 @@
 import discord
+from urllib.parse import parse_qs, urlparse
 
 # Try to import yt_dlp, fall back to youtube_dl if necessary
 try:
@@ -21,6 +22,20 @@ ytdl_options = {
 ffmpeg_options = {
     "options": "-vn"
 }
+
+
+def is_youtube_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.netloc.lower()
+    return host in ("youtu.be", "youtube.com", "www.youtube.com", "music.youtube.com", "m.youtube.com")
+
+
+def is_youtube_playlist_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    query = parse_qs(parsed.query)
+    return is_youtube_url(url) and parsed.path.rstrip("/") == "/playlist" and bool(query.get("list"))
 
 
 def _youtube_url(entry: dict) -> str | None:
@@ -101,10 +116,14 @@ def extract_playlist_urls(url: str):
 def create_audio_source(url: str):
     if ytdl_module is None:
         raise RuntimeError("yt_dlp or youtube_dl is required (install with `pip install yt-dlp` or `pip install youtube_dl`).")
+    if is_youtube_playlist_url(url):
+        raise ValueError("Ese link es una playlist, no una canción.")
 
     ytdl = ytdl_module.YoutubeDL(ytdl_options)
     info = ytdl.extract_info(url, download=False)
-    audio_url = info["url"]
+    audio_url = info.get("url")
+    if not audio_url:
+        raise ValueError("No pude obtener el audio de ese link.")
     title = info.get("title", "Unknown title")
 
     source = discord.FFmpegPCMAudio(audio_url, **ffmpeg_options)
