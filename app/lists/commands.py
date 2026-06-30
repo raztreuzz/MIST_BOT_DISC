@@ -7,7 +7,18 @@ from discord.ext import commands
 
 from app.ai.mist_voice import mist_command_reply
 from app.config import CIRCLE_ROLE_NAME
-from app.lists.storage import add_to_list, create_list, delete_list, ensure_user, get_list, list_lists, storage_stats
+from app.lists.storage import (
+    add_to_list,
+    create_list,
+    delete_list,
+    ensure_user,
+    get_list,
+    list_lists,
+    remove_list_item,
+    rename_list,
+    storage_stats,
+    update_list_item,
+)
 from app.music import extract_playlist_urls, is_youtube_playlist_url, is_youtube_url
 from app.playback import playback_manager
 
@@ -31,6 +42,20 @@ async def _get_member_roles_json(interaction: discord.Interaction) -> tuple:
 def setup_lists_commands(bot: commands.Bot) -> None:
     async def _mist(action: str, fallback: str, details: dict | None = None) -> str:
         return await mist_command_reply(action, fallback, details)
+
+    def _chunk_lines(header: str, lines: list[str], limit: int = 1900) -> list[str]:
+        chunks = []
+        current = header
+        for line in lines:
+            next_text = f"{current}\n{line}" if current else line
+            if len(next_text) > limit:
+                chunks.append(current)
+                current = line
+            else:
+                current = next_text
+        if current:
+            chunks.append(current)
+        return chunks
 
     async def _has_list_access(interaction: discord.Interaction) -> bool:
         member, roles_json = await _get_member_roles_json(interaction)
@@ -178,6 +203,29 @@ def setup_lists_commands(bot: commands.Bot) -> None:
         lines = [f"{sl.name}: {len(sl.items)} canciones" for sl in lists]
         await interaction.response.send_message("\n".join(lines))
 
+    @bot.tree.command(name="list_view", description="Muestra una lista completa con posiciones")
+    @app_commands.describe(nombre="Nombre de la lista")
+    async def list_view(interaction: discord.Interaction, nombre: str):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.")
+            return
+
+        saved_list = get_list(interaction.guild.id, nombre)
+        if saved_list is None:
+            await interaction.response.send_message("No existe una lista con ese nombre.")
+            return
+        if not saved_list.items:
+            await interaction.response.send_message(f"La lista {saved_list.name} está vacía.")
+            return
+
+        header = f"{saved_list.name}: {len(saved_list.items)} canciones"
+        lines = [f"{index}. {url}" for index, url in enumerate(saved_list.items, start=1)]
+        chunks = _chunk_lines(header, lines)
+
+        await interaction.response.send_message(chunks[0])
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk)
+
     @bot.tree.command(name="list_delete", description="Borra una lista guardada")
     @app_commands.describe(nombre="Nombre de la lista", confirmar="Debe ser true para borrar")
     async def list_delete(interaction: discord.Interaction, nombre: str, confirmar: bool = False):
@@ -209,6 +257,100 @@ def setup_lists_commands(bot: commands.Bot) -> None:
 
         fallback = f"Lista {nombre} borrada. Se eliminaron {deleted_items} canciones guardadas."
         await interaction.followup.send(await _mist("list_delete", fallback, {"lista": nombre, "canciones": deleted_items}))
+
+    @bot.tree.command(name="list_rename", description="Cambia el nombre de una lista guardada")
+    @app_commands.describe(nombre="Nombre actual de la lista", nuevo_nombre="Nuevo nombre de la lista")
+    async def list_rename(interaction: discord.Interaction, nombre: str, nuevo_nombre: str):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.")
+            return
+
+        if not await _has_list_access(interaction):
+            await interaction.response.send_message(f"No tenés permiso para editar listas. Se requiere el rol '{CIRCLE_ROLE_NAME}'.")
+            return
+
+        nuevo_nombre = nuevo_nombre.strip()
+        if not nuevo_nombre:
+            await interaction.response.send_message("El nuevo nombre no puede estar vacío.")
+            return
+
+        await interaction.response.defer()
+        renamed = rename_list(interaction.guild.id, nombre, nuevo_nombre)
+        if renamed is None:
+            await interaction.followup.send("No existe una lista con ese nombre.")
+            return
+        if not renamed:
+            await interaction.followup.send("Ya existe una lista con ese nuevo nombre.")
+            return
+
+        fallback = f"Lista renombrada: {nombre} -> {nuevo_nombre}."
+        await interaction.followup.send(
+            await _mist("list_rename", fallback, {"lista": nombre, "nuevo_nombre": nuevo_nombre})
+        )
+
+    @bot.tree.command(name="list_remove", description="Quita una canción de una lista por posición")
+    @app_commands.describe(nombre="Nombre de la lista", posicion="Número de la canción dentro de la lista")
+    async def list_remove(interaction: discord.Interaction, nombre: str, posicion: int):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.")
+            return
+
+        if not await _has_list_access(interaction):
+            await interaction.response.send_message(f"No tenés permiso para editar listas. Se requiere el rol '{CIRCLE_ROLE_NAME}'.")
+            return
+
+        if posicion < 1:
+            await interaction.response.send_message("La posición debe ser 1 o mayor.")
+            return
+
+        await interaction.response.defer()
+        removed_url = remove_list_item(interaction.guild.id, nombre, posicion)
+        if removed_url is None:
+            await interaction.followup.send("No existe una lista con ese nombre.")
+            return
+        if not removed_url:
+            await interaction.followup.send("No hay una canción en esa posición.")
+            return
+
+        fallback = f"Quité la canción #{posicion} de {nombre}."
+        await interaction.followup.send(
+            await _mist("list_remove", fallback, {"lista": nombre, "posicion": posicion, "url": removed_url})
+        )
+
+    @bot.tree.command(name="list_edit", description="Reemplaza una canción de una lista por posición")
+    @app_commands.describe(nombre="Nombre de la lista", posicion="Número de la canción a reemplazar", url="Nuevo link de YouTube")
+    async def list_edit(interaction: discord.Interaction, nombre: str, posicion: int, url: str):
+        if interaction.guild is None:
+            await interaction.response.send_message("Este comando solo funciona en un servidor.")
+            return
+
+        if not await _has_list_access(interaction):
+            await interaction.response.send_message(f"No tenés permiso para editar listas. Se requiere el rol '{CIRCLE_ROLE_NAME}'.")
+            return
+
+        if posicion < 1:
+            await interaction.response.send_message("La posición debe ser 1 o mayor.")
+            return
+        if not is_youtube_url(url):
+            await interaction.response.send_message("Necesito un link de YouTube. Para buscar por nombre usá `/search`.")
+            return
+        if is_youtube_playlist_url(url):
+            await interaction.response.send_message("Ese link es una playlist. Usá `/list_add_playlist` para importarla completa.")
+            return
+
+        await interaction.response.defer()
+        updated = update_list_item(interaction.guild.id, nombre, posicion, url)
+        if updated is None:
+            await interaction.followup.send("No existe una lista con ese nombre.")
+            return
+        if not updated:
+            await interaction.followup.send("No hay una canción en esa posición.")
+            return
+
+        fallback = f"Actualicé la canción #{posicion} de {nombre}."
+        await interaction.followup.send(
+            await _mist("list_edit", fallback, {"lista": nombre, "posicion": posicion, "url": url})
+        )
 
     @bot.tree.command(name="persist_status", description="Revisa conteos guardados en la base de datos")
     async def persist_status(interaction: discord.Interaction):

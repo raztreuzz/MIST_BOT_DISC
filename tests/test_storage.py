@@ -42,6 +42,38 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(storage.delete_list(guild_id, "zen"), 2)
         self.assertIsNone(storage.get_list(guild_id, "zen"))
 
+    def test_rename_update_and_remove_list_item(self):
+        storage = self.storage
+        guild_id = 1002
+
+        self.assertTrue(storage.create_list(guild_id, "old", "musica", creator_id=42))
+        self.assertTrue(storage.add_to_list(guild_id, "old", "https://youtube.com/watch?v=one"))
+        self.assertTrue(storage.add_to_list(guild_id, "old", "https://youtube.com/watch?v=two"))
+        self.assertTrue(storage.add_to_list(guild_id, "old", "https://youtube.com/watch?v=three"))
+
+        self.assertTrue(storage.rename_list(guild_id, "old", "new"))
+        self.assertIsNone(storage.get_list(guild_id, "old"))
+        self.assertIsNone(storage.rename_list(guild_id, "missing", "other"))
+        self.assertTrue(storage.rename_list(guild_id, "new", "new"))
+
+        self.assertTrue(storage.create_list(guild_id, "taken", "musica", creator_id=42))
+        self.assertFalse(storage.rename_list(guild_id, "new", "taken"))
+
+        self.assertTrue(storage.update_list_item(guild_id, "new", 2, "https://youtube.com/watch?v=updated"))
+        self.assertFalse(storage.update_list_item(guild_id, "new", 99, "https://youtube.com/watch?v=nope"))
+        self.assertIsNone(storage.update_list_item(guild_id, "missing", 1, "https://youtube.com/watch?v=nope"))
+
+        removed = storage.remove_list_item(guild_id, "new", 1)
+        self.assertEqual(removed, "https://youtube.com/watch?v=one")
+        self.assertEqual(storage.remove_list_item(guild_id, "new", 99), "")
+        self.assertIsNone(storage.remove_list_item(guild_id, "missing", 1))
+
+        saved = storage.get_list(guild_id, "new")
+        self.assertEqual(
+            saved.items,
+            ["https://youtube.com/watch?v=updated", "https://youtube.com/watch?v=three"],
+        )
+
     def test_user_and_ai_log_stats(self):
         storage = self.storage
         guild_id = 1377499113808986266

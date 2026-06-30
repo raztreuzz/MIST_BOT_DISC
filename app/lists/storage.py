@@ -116,6 +116,56 @@ def add_to_list(guild_id: int, name: str, url: str) -> bool:
         return True
 
 
+def rename_list(guild_id: int, old_name: str, new_name: str) -> Optional[bool]:
+    with _Session() as s:
+        lst = s.query(SavedList).filter_by(guild_id=guild_id, name=old_name).first()
+        if lst is None:
+            return None
+        existing = s.query(SavedList).filter_by(guild_id=guild_id, name=new_name).first()
+        if existing is not None and existing.id != lst.id:
+            return False
+        lst.name = new_name
+        s.commit()
+        return True
+
+
+def update_list_item(guild_id: int, name: str, position: int, url: str) -> Optional[bool]:
+    with _Session() as s:
+        lst = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()
+        if lst is None:
+            return None
+        item = s.query(ListItem).filter_by(list_id=lst.id, position=position).first()
+        if item is None:
+            return False
+        item.url = url
+        s.commit()
+        return True
+
+
+def remove_list_item(guild_id: int, name: str, position: int) -> Optional[str]:
+    with _Session() as s:
+        lst = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()
+        if lst is None:
+            return None
+        item = s.query(ListItem).filter_by(list_id=lst.id, position=position).first()
+        if item is None:
+            return ""
+        removed_url = item.url
+        s.delete(item)
+
+        remaining = (
+            s.query(ListItem)
+            .filter(ListItem.list_id == lst.id, ListItem.position > position)
+            .order_by(ListItem.position.asc())
+            .all()
+        )
+        for remaining_item in remaining:
+            remaining_item.position -= 1
+
+        s.commit()
+        return removed_url
+
+
 def delete_list(guild_id: int, name: str) -> Optional[int]:
     with _Session() as s:
         lst = s.query(SavedList).filter_by(guild_id=guild_id, name=name).first()

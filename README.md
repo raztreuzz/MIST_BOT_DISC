@@ -41,8 +41,12 @@ poetry run python -m app.bot
 - `/list_add_bulk`
 - `/list_add_playlist`
 - `/list_add_current`
+- `/list_rename`
+- `/list_edit`
+- `/list_remove`
 - `/list_delete`
 - `/list_show`
+- `/list_view`
 - `/list_play`
 - `/persist_status`
 
